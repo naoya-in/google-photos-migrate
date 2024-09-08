@@ -11,6 +11,7 @@ import {
   MissingMetaError,
   WrongExtensionError,
 } from './apply-meta-errors';
+import { execSync } from 'child_process'; // Added to retrieve EXIF data
 
 export async function applyMetaFile(
   mediaFile: MediaFile,
@@ -19,30 +20,62 @@ export async function applyMetaFile(
   const metaJson = (await readFile(mediaFile.jsonPath)).toString();
   const meta: GoogleMetadata | undefined = JSON.parse(metaJson);
 
-  // time
+  // UTC time
   const timeTakenTimestamp = meta?.photoTakenTime?.timestamp;
   if (timeTakenTimestamp === undefined)
     return new MissingMetaError(mediaFile, 'photoTakenTime');
   const timeTaken = new Date(parseInt(timeTakenTimestamp) * 1000);
-  // always UTC as per https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/toISOString
-  const timeTakenUTC = timeTaken.toISOString();
+
+  // Retrieve SubSecDateTimeOriginal from EXIF data to get the time zone information
+  let timeZoneOffset: string | null = null;
+  let timeTakenLocal: string | null = null;
+
+  try {
+    // Use exiftool to get SubSecDateTimeOriginal
+    const exifOutput = execSync(`exiftool -SubSecDateTimeOriginal "${mediaFile.path}"`).toString();
+    const match = exifOutput.match(/(\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}\.\d{3})([+\-]\d{2}:\d{2})/);
+  
+    if (match) {
+      const dateTimeOriginal = match[1];  // DateTime part
+      timeZoneOffset = match[2];  // Time zone offset
+  
+      // Parse the time using the time zone offset
+      timeTakenLocal = new Date(`${dateTimeOriginal}${timeZoneOffset}`).toISOString();
+    }
+  } catch (error) {
+    console.error('Failed to retrieve EXIF data', error);
+  }
+  
 
   const tags: WriteTags = {};
 
+  if (timeTakenLocal) {
+    // If time zone information is available
+    tags.SubSecDateTimeOriginal = timeTakenLocal;
+    tags.SubSecCreateDate = timeTakenLocal;
+    tags.SubSecModifyDate = timeTakenLocal;
+  } else {
+    // If time zone information is not available, use UTC
+    const timeTakenUTC = timeTaken.toISOString();
+    tags.SubSecDateTimeOriginal = timeTakenUTC;
+    tags.SubSecCreateDate = timeTakenUTC;
+    tags.SubSecModifyDate = timeTakenUTC;
+  }
+
   switch (mediaFile.ext.metaType) {
     case MetaType.EXIF:
-      tags.SubSecDateTimeOriginal = timeTakenUTC;
-      tags.SubSecCreateDate = timeTakenUTC;
-      tags.SubSecModifyDate = timeTakenUTC;
+      tags.SubSecDateTimeOriginal = timeTakenLocal || timeTaken.toISOString();
+      tags.SubSecCreateDate = timeTakenLocal || timeTaken.toISOString();
+      tags.SubSecModifyDate = timeTakenLocal || timeTaken.toISOString();
       break;
     case MetaType.QUICKTIME:
-      tags.DateTimeOriginal = timeTakenUTC;
-      tags.CreateDate = timeTakenUTC;
-      tags.ModifyDate = timeTakenUTC;
-      tags.TrackCreateDate = timeTakenUTC;
-      tags.TrackModifyDate = timeTakenUTC;
-      tags.MediaCreateDate = timeTakenUTC;
-      tags.MediaModifyDate = timeTakenUTC;
+      tags.DateTimeOriginal = timeTakenLocal || timeTaken.toISOString();
+      tags.CreateDate = timeTakenLocal || timeTaken.toISOString();
+      tags.ModifyDate = timeTakenLocal || timeTaken.toISOString();
+      tags.TrackCreateDate = timeTakenLocal || timeTaken.toISOString();
+      tags.TrackModifyDate = timeTakenLocal || timeTaken.toISOString();
+      tags.MediaCreateDate = timeTakenLocal || timeTaken.toISOString();
+      tags.MediaModifyDate = timeTakenLocal || timeTaken.toISOString();
       break;
     case MetaType.NONE:
       break;
@@ -50,7 +83,7 @@ export async function applyMetaFile(
       exhaustiveCheck(mediaFile.ext.metaType);
   }
 
-  tags.ModifyDate = timeTakenUTC;
+  tags.ModifyDate = timeTakenLocal || timeTaken.toISOString();
 
   // description
   const description = meta?.description;
