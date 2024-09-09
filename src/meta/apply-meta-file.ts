@@ -11,7 +11,7 @@ import {
   MissingMetaError,
   WrongExtensionError,
 } from './apply-meta-errors';
-import { execSync } from 'child_process'; // Added to retrieve EXIF data
+import { execSync } from 'child_process';
 
 export async function applyMetaFile(
   mediaFile: MediaFile,
@@ -26,26 +26,45 @@ export async function applyMetaFile(
     return new MissingMetaError(mediaFile, 'photoTakenTime');
   const timeTaken = new Date(parseInt(timeTakenTimestamp) * 1000);
 
-  // Retrieve SubSecDateTimeOriginal from EXIF data to get the time zone information
+  // EXIF データから SubSecDateTimeOriginal を取得してタイムゾーン情報を確認
   let timeZoneOffset: string | null = null;
   let timeTakenLocal: string | null = null;
 
   try {
-    // Use exiftool to get SubSecDateTimeOriginal
+    // Use exiftool to get SubSecDateTimeOriginal with quotes around the file path
+    console.log(`Running exiftool for file: ${mediaFile.path}`);
     const exifOutput = execSync(`exiftool -SubSecDateTimeOriginal "${mediaFile.path}"`).toString();
-    const match = exifOutput.match(/(\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}\.\d{3})([+\-]\d{2}:\d{2})/);
+    console.log(`Exif output: ${exifOutput}`);
+  
+    const match = exifOutput.match(/(\d{4}:\d{2}:\d{2}) (\d{2}:\d{2}:\d{2}\.\d{3})([+\-]\d{2}:\d{2})/);
   
     if (match) {
-      const dateTimeOriginal = match[1];  // DateTime part
-      timeZoneOffset = match[2];  // Time zone offset
+      let datePart = match[1];  // Date part (YYYY:MM:DD)
+      let timePart = match[2];  // Time part (HH:MM:SS.SSS)
+      const timeZoneOffset = match[3];  // Time zone offset
   
-      // Parse the time using the time zone offset
-      timeTakenLocal = new Date(`${dateTimeOriginal}${timeZoneOffset}`).toISOString();
+      console.log(`Parsed datePart: ${datePart}, timePart: ${timePart}, timeZoneOffset: ${timeZoneOffset}`);
+  
+      // Convert 'YYYY:MM:DD' to 'YYYY-MM-DD' and append 'T' between date and time
+      datePart = datePart.replace(/:/g, '-');
+      const isoDateTime = `${datePart}T${timePart}${timeZoneOffset}`;
+  
+      // Manually create the date string to be written to EXIF
+      const exifDateTime = `${match[1]} ${match[2]}${timeZoneOffset}`;
+      console.log(`EXIF DateTime to be written: ${exifDateTime}`);
+  
+      if (exifDateTime) {
+        // Write the manually created date string with time zone to EXIF
+        timeTakenLocal = exifDateTime;
+      } else {
+        console.error('Invalid Date parsed from EXIF data');
+      }
+    } else {
+      console.error('Failed to match SubSecDateTimeOriginal format');
     }
   } catch (error) {
     console.error('Failed to retrieve EXIF data', error);
   }
-  
 
   const tags: WriteTags = {};
 
