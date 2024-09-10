@@ -13,6 +13,19 @@ import {
 } from './apply-meta-errors';
 import { execSync } from 'child_process';
 
+// Global variable to manage the time zone offset (in hours)
+// For JST (UTC+9), set this to 9. For other time zones, adjust accordingly.
+const timeZoneOffsetHours = 9;  // You can modify this value to suit your needs
+
+// Helper function to format the time zone offset as a string (e.g., "+09:00")
+function formatTimeZoneOffset(offsetHours: number): string {
+  const sign = offsetHours >= 0 ? '+' : '-';
+  const absOffset = Math.abs(offsetHours);
+  const hours = String(Math.floor(absOffset)).padStart(2, '0');
+  const minutes = String((absOffset % 1) * 60).padStart(2, '0');
+  return `${sign}${hours}:${minutes}`;
+}
+
 export async function applyMetaFile(
   mediaFile: MediaFile,
   migCtx: MigrationContext,
@@ -20,11 +33,14 @@ export async function applyMetaFile(
   const metaJson = (await readFile(mediaFile.jsonPath)).toString();
   const meta: GoogleMetadata | undefined = JSON.parse(metaJson);
 
-  // UTC time
+  // UTC time from the JSON metadata
   const timeTakenTimestamp = meta?.photoTakenTime?.timestamp;
   if (timeTakenTimestamp === undefined)
     return new MissingMetaError(mediaFile, 'photoTakenTime');
   const timeTaken = new Date(parseInt(timeTakenTimestamp) * 1000);
+
+  // Default time zone offset
+  const defaultTimeZoneOffset = formatTimeZoneOffset(timeZoneOffsetHours);
 
   // EXIF データから SubSecDateTimeOriginal を取得してタイムゾーン情報を確認
   let timeZoneOffset: string | null = null;
@@ -36,34 +52,37 @@ export async function applyMetaFile(
     const exifOutput = execSync(`exiftool -SubSecDateTimeOriginal "${mediaFile.path}"`).toString();
     console.log(`Exif output: ${exifOutput}`);
   
-    const match = exifOutput.match(/(\d{4}:\d{2}:\d{2}) (\d{2}:\d{2}:\d{2}\.\d{3})([+\-]\d{2}:\d{2})/);
+    // Match patterns with or without time zone information
+    const match = exifOutput.match(/(\d{4}:\d{2}:\d{2}) (\d{2}:\d{2}:\d{2}(?:\.\d+)?)([+\-]\d{2}:\d{2})?/);
   
     if (match) {
       let datePart = match[1];  // Date part (YYYY:MM:DD)
-      let timePart = match[2];  // Time part (HH:MM:SS.SSS)
-      const timeZoneOffset = match[3];  // Time zone offset
-  
+      let timePart = match[2];  // Time part (HH:MM:SS.SSS or HH:MM:SS)
+      timeZoneOffset = match[3] || defaultTimeZoneOffset;  // Use the extracted time zone offset, or fall back to default
+
       console.log(`Parsed datePart: ${datePart}, timePart: ${timePart}, timeZoneOffset: ${timeZoneOffset}`);
   
-      // Convert 'YYYY:MM:DD' to 'YYYY-MM-DD' and append 'T' between date and time
+      // Convert 'YYYY:MM:DD' to 'YYYY-MM-DD'
       datePart = datePart.replace(/:/g, '-');
-      const isoDateTime = `${datePart}T${timePart}${timeZoneOffset}`;
   
       // Manually create the date string to be written to EXIF
-      const exifDateTime = `${match[1]} ${match[2]}${timeZoneOffset}`;
+      const exifDateTime = `${datePart} ${timePart}${timeZoneOffset}`;
       console.log(`EXIF DateTime to be written: ${exifDateTime}`);
   
-      if (exifDateTime) {
-        // Write the manually created date string with time zone to EXIF
-        timeTakenLocal = exifDateTime;
-      } else {
-        console.error('Invalid Date parsed from EXIF data');
-      }
+      timeTakenLocal = exifDateTime;
     } else {
-      console.error('Failed to match SubSecDateTimeOriginal format');
+      console.error('Failed to match SubSecDateTimeOriginal format, using default time zone');
     }
   } catch (error) {
-    console.error('Failed to retrieve EXIF data', error);
+    console.error('Failed to retrieve EXIF data, using default time zone', error);
+  }
+
+  // If SubSecDateTimeOriginal wasn't available, use the default time zone
+  if (!timeTakenLocal) {
+    const adjustedTime = new Date(timeTaken.getTime() + timeZoneOffsetHours * 60 * 60 * 1000);  // Adjust UTC time
+    const adjustedTimeString = adjustedTime.toISOString().split('.')[0];  // Remove milliseconds
+    timeTakenLocal = adjustedTimeString.replace('T', ' ') + defaultTimeZoneOffset;  // Convert to 'YYYY-MM-DD HH:MM:SS+09:00'
+    console.log(`Using default time zone for DateTime: ${timeTakenLocal}`);
   }
 
   const tags: WriteTags = {};
@@ -73,28 +92,22 @@ export async function applyMetaFile(
     tags.SubSecDateTimeOriginal = timeTakenLocal;
     tags.SubSecCreateDate = timeTakenLocal;
     tags.SubSecModifyDate = timeTakenLocal;
-  } else {
-    // If time zone information is not available, use UTC
-    const timeTakenUTC = timeTaken.toISOString();
-    tags.SubSecDateTimeOriginal = timeTakenUTC;
-    tags.SubSecCreateDate = timeTakenUTC;
-    tags.SubSecModifyDate = timeTakenUTC;
   }
 
   switch (mediaFile.ext.metaType) {
     case MetaType.EXIF:
-      tags.SubSecDateTimeOriginal = timeTakenLocal || timeTaken.toISOString();
-      tags.SubSecCreateDate = timeTakenLocal || timeTaken.toISOString();
-      tags.SubSecModifyDate = timeTakenLocal || timeTaken.toISOString();
+      tags.SubSecDateTimeOriginal = timeTakenLocal;
+      tags.SubSecCreateDate = timeTakenLocal;
+      tags.SubSecModifyDate = timeTakenLocal;
       break;
     case MetaType.QUICKTIME:
-      tags.DateTimeOriginal = timeTakenLocal || timeTaken.toISOString();
-      tags.CreateDate = timeTakenLocal || timeTaken.toISOString();
-      tags.ModifyDate = timeTakenLocal || timeTaken.toISOString();
-      tags.TrackCreateDate = timeTakenLocal || timeTaken.toISOString();
-      tags.TrackModifyDate = timeTakenLocal || timeTaken.toISOString();
-      tags.MediaCreateDate = timeTakenLocal || timeTaken.toISOString();
-      tags.MediaModifyDate = timeTakenLocal || timeTaken.toISOString();
+      tags.DateTimeOriginal = timeTakenLocal;
+      tags.CreateDate = timeTakenLocal;
+      tags.ModifyDate = timeTakenLocal;
+      tags.TrackCreateDate = timeTakenLocal;
+      tags.TrackModifyDate = timeTakenLocal;
+      tags.MediaCreateDate = timeTakenLocal;
+      tags.MediaModifyDate = timeTakenLocal;
       break;
     case MetaType.NONE:
       break;
@@ -102,7 +115,7 @@ export async function applyMetaFile(
       exhaustiveCheck(mediaFile.ext.metaType);
   }
 
-  tags.ModifyDate = timeTakenLocal || timeTaken.toISOString();
+  tags.ModifyDate = timeTakenLocal;
 
   // description
   const description = meta?.description;
