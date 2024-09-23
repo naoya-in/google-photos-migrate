@@ -146,9 +146,6 @@ export async function applyMetaFile(
       '-api',
       'largefilesupport=1',
     ]);
-
-    // Set file modification times to the photo taken timestamp
-    await utimes(mediaFile.path, timeTaken, timeTaken);
   } catch (e) {
     if (e instanceof Error) {
       const wrongExtMatch = e.message.match(
@@ -166,6 +163,9 @@ export async function applyMetaFile(
       return new ExifToolError(mediaFile, e);
     }
     return new ExifToolError(mediaFile, new Error(`${e}`));
+  } finally {
+    // Set file modification times to the photo taken timestamp
+    await utimes(mediaFile.path, timeTaken, timeTaken);
   }
 
   return null;
