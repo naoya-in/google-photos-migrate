@@ -48,9 +48,7 @@ export async function applyMetaFile(
 
   try {
     // Use exiftool to get SubSecDateTimeOriginal with quotes around the file path
-    console.log(`Running exiftool for file: ${mediaFile.path}`);
     const exifOutput = execSync(`exiftool -SubSecDateTimeOriginal "${mediaFile.path}"`).toString();
-    console.log(`Exif output: ${exifOutput}`);
   
     // Match patterns with or without time zone information
     const match = exifOutput.match(/(\d{4}:\d{2}:\d{2}) (\d{2}:\d{2}:\d{2}(?:\.\d+)?)([+\-]\d{2}:\d{2})?/);
@@ -59,15 +57,12 @@ export async function applyMetaFile(
       let datePart = match[1];  // Date part (YYYY:MM:DD)
       let timePart = match[2];  // Time part (HH:MM:SS.SSS or HH:MM:SS)
       timeZoneOffset = match[3] || defaultTimeZoneOffset;  // Use the extracted time zone offset, or fall back to default
-
-      console.log(`Parsed datePart: ${datePart}, timePart: ${timePart}, timeZoneOffset: ${timeZoneOffset}`);
   
       // Convert 'YYYY:MM:DD' to 'YYYY-MM-DD'
       datePart = datePart.replace(/:/g, '-');
   
       // Manually create the date string to be written to EXIF
       const exifDateTime = `${datePart} ${timePart}${timeZoneOffset}`;
-      console.log(`EXIF DateTime to be written: ${exifDateTime}`);
   
       timeTakenLocal = exifDateTime;
     } else {
@@ -82,7 +77,6 @@ export async function applyMetaFile(
     const adjustedTime = new Date(timeTaken.getTime() + timeZoneOffsetHours * 60 * 60 * 1000);  // Adjust UTC time
     const adjustedTimeString = adjustedTime.toISOString().split('.')[0];  // Remove milliseconds
     timeTakenLocal = adjustedTimeString.replace('T', ' ') + defaultTimeZoneOffset;  // Convert to 'YYYY-MM-DD HH:MM:SS+09:00'
-    console.log(`Using default time zone for DateTime: ${timeTakenLocal}`);
   }
 
   const tags: WriteTags = {};
