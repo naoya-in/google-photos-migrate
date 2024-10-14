@@ -133,9 +133,6 @@ export async function applyMetaFile(
   }
 
   try {
-    const command = `exiftool ${mediaFile.path} ${JSON.stringify(tags)} -overwrite_original -api quicktimeutc -api largefilesupport=1`;
-    console.log(`Executing command: ${command}`);
-    
     await migCtx.exiftool.write(mediaFile.path, tags, [
       '-overwrite_original',
       '-api',
