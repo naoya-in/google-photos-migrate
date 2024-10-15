@@ -66,7 +66,7 @@ export async function applyMetaFile(
   
       timeTakenLocal = exifDateTime;
     } else {
-      console.error('Failed to match SubSecDateTimeOriginal format, using default time zone');
+      // console.error('Failed to match SubSecDateTimeOriginal format, using default time zone');
     }
   } catch (error) {
     console.error('Failed to retrieve EXIF data, using default time zone', error);
